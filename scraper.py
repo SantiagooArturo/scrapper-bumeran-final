@@ -61,9 +61,51 @@ class BumeranScraper:
         self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
         self.random_sleep(0.5, 1)
 
-    def scrape_jobs(self, url):
-        print(f"Accediendo a {url}")
-        self.driver.get(url)
+    def get_total_pages(self):
+        try:
+            # Encontrar todos los enlaces de paginación
+            pagination_links = self.driver.find_elements(By.CSS_SELECTOR, "div.sc-cGDfzg a")
+            if pagination_links:
+                # El último número es el total de páginas
+                return int(pagination_links[-1].text)
+        except Exception as e:
+            print(f"Error al obtener el total de páginas: {str(e)}")
+        return 1
+
+    def scrape_all_pages(self, base_url):
+        print(f"Accediendo a {base_url}")
+        self.driver.get(base_url)
+        all_jobs = []
+        
+        # Obtener el número total de páginas
+        total_pages = self.get_total_pages()
+        print(f"Total de páginas encontradas: {total_pages}")
+        
+        # Iterar sobre cada página
+        for page in range(1, total_pages + 1):
+            print(f"\nProcesando página {page} de {total_pages}")
+            
+            if page > 1:
+                # Construir la URL de la página actual
+                current_url = f"{base_url}?page={page}"
+                print(f"Accediendo a {current_url}")
+                self.driver.get(current_url)
+            
+            # Obtener los trabajos de la página actual
+            page_jobs = self.scrape_jobs()
+            if page_jobs:
+                all_jobs.extend(page_jobs)
+            
+            # Pausa entre páginas para evitar sobrecarga
+            self.random_sleep(2, 4)
+        
+        return all_jobs
+
+    def scrape_jobs(self, url=None):
+        if url and not hasattr(self, 'driver'):
+            print(f"Accediendo a {url}")
+            self.driver.get(url)
+        
         jobs = []
         
         try:
@@ -211,14 +253,14 @@ class BumeranScraper:
         self.driver.quit()
 
 def main():
-    url = "https://www.bumeran.com.pe/en-lima/empleos-publicacion-menor-a-3-dias-busqueda-practicante.html"
+    base_url = "https://www.bumeran.com.pe/en-lima/empleos-publicacion-menor-a-3-dias-busqueda-practicante.html"
     scraper = BumeranScraper()
     
     try:
         print("Iniciando scraping...")
-        jobs = scraper.scrape_jobs(url)
+        jobs = scraper.scrape_all_pages(base_url)
         scraper.save_to_csv(jobs)
-        print(f"Se encontraron {len(jobs)} trabajos")
+        print(f"Se encontraron {len(jobs)} trabajos en total")
     except Exception as e:
         print(f"Error durante el scraping: {str(e)}")
     finally:
