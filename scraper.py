@@ -10,6 +10,21 @@ import random
 import subprocess
 import os
 import json
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import firestore
+from datetime import datetime
+
+# Inicializar Firebase con las credenciales
+cred = credentials.Certificate('firebase-credentials.json')
+try:
+    firebase_admin.initialize_app(cred)
+except ValueError:
+    # La aplicación ya está inicializada
+    pass
+
+# Obtener la instancia de Firestore
+db = firestore.client()
 
 class BumeranScraper:
     def __init__(self):
@@ -192,27 +207,28 @@ class BumeranScraper:
                             print("No se pudo extraer la ubicación")
                     
                     try:
-                        published = card.find_element(By.XPATH, ".//h3[contains(@class, 'sc-iLQbDB')]").text
+                        end_date = card.find_element(By.XPATH, ".//h3[contains(@class, 'sc-iLQbDB')]").text
                     except:
                         try:
-                            published = card.find_element(By.XPATH, ".//div[contains(@class, 'sc-lmrgJh')]//h3").text
+                            end_date = card.find_element(By.XPATH, ".//div[contains(@class, 'sc-lmrgJh')]//h3").text
                         except:
-                            published = "No disponible"
+                            end_date = "No disponible"
                             print("No se pudo extraer la fecha de publicación")
                     
                     try:
-                        link = card.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
+                        url = card.find_element(By.CSS_SELECTOR, "a").get_attribute("href")
                     except:
-                        link = "No disponible"
+                        url = "No disponible"
                         print("No se pudo extraer el enlace")
                     
-                    # Crear diccionario con la información
+                    # Crear diccionario con la información estandarizada
                     job_info = {
-                        'title': title,
                         'company': company,
+                        'end_date': end_date,
                         'location': location,
-                        'published': published,
-                        'link': link
+                        'salary': "2025",
+                        'title': title,
+                        'url': url
                     }
                     
                     jobs.append(job_info)
@@ -249,6 +265,45 @@ class BumeranScraper:
         else:
             print("No hay trabajos para guardar")
 
+    def save_to_firebase(self, jobs):
+        if not jobs:
+            print("No hay trabajos para guardar en Firebase")
+            return
+
+        try:
+            # Crear un nuevo documento en la colección extractions
+            extraction_ref = db.collection('extractions').document()
+            
+            # Metadata del scraping
+            extraction_data = {
+                'extraction_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'source': 'bumeran.pe',
+                'total': len(jobs),
+                'total_practices': len(jobs),
+                'max_pages': self.get_total_pages(),
+                'use_selenium': True
+            }
+            
+            # Guardar metadata
+            extraction_ref.set(extraction_data)
+            print(f"Metadata guardada en Firebase con ID: {extraction_ref.id}")
+            
+            # Crear una subcolección 'practices' para los trabajos
+            practices_ref = extraction_ref.collection('practices')
+            
+            # Guardar cada trabajo como un documento en la subcolección
+            for job in jobs:
+                # Generar un ID único para el documento
+                doc_ref = practices_ref.document()
+                doc_ref.set(job)
+            
+            print(f"Se guardaron {len(jobs)} trabajos en Firebase")
+            return extraction_ref.id
+            
+        except Exception as e:
+            print(f"Error al guardar en Firebase: {str(e)}")
+            return None
+
     def close(self):
         self.driver.quit()
 
@@ -259,8 +314,17 @@ def main():
     try:
         print("Iniciando scraping...")
         jobs = scraper.scrape_all_pages(base_url)
+        
+        # Guardar en CSV y JSON (local)
         scraper.save_to_csv(jobs)
-        print(f"Se encontraron {len(jobs)} trabajos en total")
+        
+        # Guardar en Firebase
+        firebase_id = scraper.save_to_firebase(jobs)
+        if firebase_id:
+            print(f"Datos guardados exitosamente en Firebase con ID: {firebase_id}")
+        
+        print(f"Se encontraron y procesaron {len(jobs)} trabajos en total")
+        
     except Exception as e:
         print(f"Error durante el scraping: {str(e)}")
     finally:
